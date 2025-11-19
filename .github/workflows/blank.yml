@@ -4,30 +4,35 @@ on: [push, workflow_dispatch]
 
 jobs:
   build:
-    # Set a 6-hour timeout to keep the RDP session alive
     runs-on: windows-latest
-    timeout-minutes: 360 
+    # FIX: Add a timeout to keep the runner alive for up to 6 hours for RDP
+    timeout-minutes: 360
 
     steps:
-    
-    # 1. Enable RDP and set user credentials
-    - name: Enable RDP and Set Credentials
-      run: |
-        # Enable Terminal Services (RDP)
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
-        # Enable RDP firewall rule
-        Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-        # Set the password for the runneradmin user
-        Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
-        Write-Host "RDP is enabled. Waiting for ngrok tunnel address..."
-    
-    # 2. Create the ngrok tunnel using a reliable action
-    # This action handles downloading the latest ngrok, authentication, and starting the tunnel.
-    - name: Create ngrok Tunnel for RDP
-      uses: chomado/ngrok-tunnel-action@v1
-      with:
-        ngrok_token: ${{ secrets.NGROK_AUTH_TOKEN }}
-        tunnel_type: tcp
-        port: 3389
-        region: us
+    - name: Download
+      # FIX: Use WinGet to download and install the latest ngrok V3 agent (fixes ERR_NGROK_121)
+      run: winget install --id ngrok.ngrok --silent --accept-package-agreements --accept-source-agreements
+
+    - name: Extract
+      # FIX: Replaced Extract with a status message, as WinGet installs directly to PATH.
+      run: Write-Host "ngrok V3 installed and ready in system PATH."
+
+    - name: Auth
+      # FIX: Use 'ngrok' command directly (as it's in PATH) and the modern V3 authtoken command
+      run: ngrok config add-authtoken $Env:NGROK_AUTH_TOKEN
+      env:
+        NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+
+    - name: Enable TS
+      # RDP Setup Step 1: Allow Terminal Services Connections
+      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
+
+    - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+    - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+
+    - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
+
+    - name: Create Tunnel
+      # FIX: Use 'ngrok' command directly (as it's in PATH). This will run indefinitely.
+      run: ngrok tcp 3389
